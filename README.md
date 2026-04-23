@@ -73,6 +73,8 @@ When a staff member opens an email from a known patron:
 
 If the sender is not in the patron database, the card shows "Not a known patron."
 
+![RHPL Patron Check sidebar showing a Digital Card Holder with Open in LEAP button](docs/sidebar-card.png)
+
 ---
 
 ## Prerequisites
