@@ -1,4 +1,4 @@
-// RHPL Patron Check — Gmail Add-on
+// Patron Check — Gmail Add-on
 // Displays patron status in the Gmail sidebar when staff open an email.
 // The card is UI-only and never travels with replies or forwards.
 //
@@ -144,7 +144,7 @@ function buildUnknownCard_() {
 }
 
 function buildHeader_() {
-  // TODO: update title and icon URL to match your library
+  // Update title and logoUrl to match your library
   return CardService.newCardHeader()
     .setTitle('Patron Check')
     .setImageUrl('https://yourdomain.org/favicon.ico')

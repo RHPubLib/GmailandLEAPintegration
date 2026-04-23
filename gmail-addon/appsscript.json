@@ -3,10 +3,15 @@
   "runtimeVersion": "V8",
   "oauthScopes": [
     "https://www.googleapis.com/auth/gmail.addons.execute",
-    "https://www.googleapis.com/auth/gmail.readonly"
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/script.external_request"
+  ],
+  "urlFetchWhitelist": [
+    "https://oauth2.googleapis.com/token",
+    "https://sheets.googleapis.com/"
   ],
   "gmail": {
-    "name": "RHPL Patron Check",
+    "name": "Patron Check",
     "logoUrl": "https://yourdomain.org/favicon.ico",
     "contextualTriggers": [
       {
