@@ -2,11 +2,12 @@
 // Displays patron status in the Gmail sidebar when staff open an email.
 // The card is UI-only and never travels with replies or forwards.
 //
-// SETUP: Set your Google Sheet ID in Apps Script project settings:
-//   Project Settings → Script Properties → Add property:
-//   Key: SHEET_ID   Value: <your Google Sheet ID from the URL>
+// SETUP: Set the following in Apps Script Project Settings → Script Properties:
+//   SHEET_ID               — Google Sheet ID from the URL
+//   SERVICE_ACCOUNT_EMAIL  — service account email (from GCP IAM)
+//   SERVICE_ACCOUNT_KEY    — private_key value from the service account JSON file
 
-function getSheetId() {
+function getSheetId_() {
   return PropertiesService.getScriptProperties().getProperty('SHEET_ID');
 }
 
@@ -19,38 +20,98 @@ const PATRON_TYPES = {
 
 function onGmailMessage(e) {
   GmailApp.setCurrentMessageAccessToken(e.gmail.accessToken);
-  const msg = GmailApp.getMessageById(e.gmail.messageId);
-  const from = msg.getFrom();
+  const msg   = GmailApp.getMessageById(e.gmail.messageId);
+  const from  = msg.getFrom();
   const match = from.match(/<(.+?)>/) || from.match(/(\S+@\S+)/);
   const senderEmail = match ? match[1].toLowerCase() : null;
 
-  if (!senderEmail) return buildUnknownCard();
+  if (!senderEmail) return buildUnknownCard_();
 
-  const result = lookupPatron(senderEmail);
-  return result ? buildPatronCard(result) : buildUnknownCard();
+  const result = lookupPatron_(senderEmail);
+  return result ? buildPatronCard_(result) : buildUnknownCard_();
 }
 
-function lookupPatron(email) {
-  const sheetId = getSheetId();
-  if (!sheetId) {
-    throw new Error('SHEET_ID script property not set. See setup instructions.');
+// ---------------------------------------------------------------------------
+// Service account token
+// Cached for 55 minutes so each email open doesn't re-generate a JWT.
+// ---------------------------------------------------------------------------
+function getServiceAccountToken_() {
+  const cache  = CacheService.getScriptCache();
+  const cached = cache.get('sa_access_token');
+  if (cached) return cached;
+
+  const props   = PropertiesService.getScriptProperties();
+  const saEmail = props.getProperty('SERVICE_ACCOUNT_EMAIL');
+  const saKey   = (props.getProperty('SERVICE_ACCOUNT_KEY') || '').replace(/\\n/g, '\n');
+
+  if (!saEmail || !saKey) {
+    throw new Error('SERVICE_ACCOUNT_EMAIL or SERVICE_ACCOUNT_KEY not set in Script Properties.');
   }
-  const ss = SpreadsheetApp.openById(sheetId);
+
+  const now    = Math.floor(Date.now() / 1000);
+  const header = Utilities.base64EncodeWebSafe(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).replace(/=+$/, '');
+  const claim  = Utilities.base64EncodeWebSafe(JSON.stringify({
+    iss:   saEmail,
+    scope: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+    aud:   'https://oauth2.googleapis.com/token',
+    exp:   now + 3600,
+    iat:   now,
+  })).replace(/=+$/, '');
+
+  const toSign    = `${header}.${claim}`;
+  const signature = Utilities.computeRsaSha256Signature(toSign, saKey);
+  const jwt       = `${toSign}.${Utilities.base64EncodeWebSafe(signature).replace(/=+$/, '')}`;
+
+  const resp = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method:             'post',
+    payload:            { grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt },
+    muteHttpExceptions: true,
+  });
+
+  const json = JSON.parse(resp.getContentText());
+  if (!json.access_token) {
+    throw new Error('Service account token exchange failed: ' + resp.getContentText());
+  }
+
+  cache.put('sa_access_token', json.access_token, 3300);
+  return json.access_token;
+}
+
+// ---------------------------------------------------------------------------
+// Patron lookup — calls Sheets REST API as service account
+// Staff Google accounts require no Sheet access at all.
+// ---------------------------------------------------------------------------
+function lookupPatron_(email) {
+  const sheetId = getSheetId_();
+  if (!sheetId) throw new Error('SHEET_ID not set in Script Properties.');
+
+  const token = getServiceAccountToken_();
+
   for (const type of ['Full', 'Digital Card', 'Restricted']) {
-    const sheet = ss.getSheetByName(type);
-    if (!sheet || sheet.getLastRow() === 0) continue;
-    const data = sheet.getRange(1, 1, sheet.getLastRow(), 2).getValues();
-    for (const row of data) {
-      if (String(row[0]).toLowerCase().trim() === email) {
-        return { type: type, leapUrl: String(row[1]).trim() || null };
+    const range = type.includes(' ') ? `'${type}'` : type;
+    const url   = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`;
+    const resp  = UrlFetchApp.fetch(url, {
+      headers:            { Authorization: `Bearer ${token}` },
+      muteHttpExceptions: true,
+    });
+
+    if (resp.getResponseCode() !== 200) continue;
+
+    const rows = JSON.parse(resp.getContentText()).values || [];
+    for (const row of rows) {
+      if (row[0] && row[0].toLowerCase().trim() === email) {
+        return { type: type, leapUrl: (row[1] || '').trim() || null };
       }
     }
   }
   return null;
 }
 
-function buildPatronCard(result) {
-  const info = PATRON_TYPES[result.type];
+// ---------------------------------------------------------------------------
+// Card builders
+// ---------------------------------------------------------------------------
+function buildPatronCard_(result) {
+  const info    = PATRON_TYPES[result.type];
   const section = CardService.newCardSection()
     .setHeader(info.label)
     .addWidget(CardService.newDecoratedText().setTopLabel('Status').setText(info.status))
@@ -67,14 +128,14 @@ function buildPatronCard(result) {
   }
 
   return CardService.newCardBuilder()
-    .setHeader(buildHeader())
+    .setHeader(buildHeader_())
     .addSection(section)
     .build();
 }
 
-function buildUnknownCard() {
+function buildUnknownCard_() {
   return CardService.newCardBuilder()
-    .setHeader(buildHeader())
+    .setHeader(buildHeader_())
     .addSection(
       CardService.newCardSection()
         .addWidget(CardService.newTextParagraph().setText('Not a known patron.'))
@@ -82,7 +143,7 @@ function buildUnknownCard() {
     .build();
 }
 
-function buildHeader() {
+function buildHeader_() {
   // TODO: update title and icon URL to match your library
   return CardService.newCardHeader()
     .setTitle('Patron Check')
