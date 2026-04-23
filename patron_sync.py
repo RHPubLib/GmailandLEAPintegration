@@ -12,11 +12,11 @@ Flow:
   5. Write each list to its Google Sheet tab (email + LEAP URL)
   6. Delete processed report emails from inbox
 
-Groups:
-  Full    — Full Cardholder   (PatronCodes 1,3,6,8,14,24,25,26,29)
-  Digital — Digital Card      (PatronCodes 15,20,27)
-  Limited — Restricted Card   (PatronCodes 2,4,9,17)
-  Excluded (no card) — Staff  (PatronCodes 7,19,22)
+Groups (customize PatronCodeIDs in LISTS below to match your Polaris configuration):
+  Full    — Full Cardholder
+  Digital — Digital Card
+  Limited — Restricted Card
+  Excluded — Staff (filtered by STAFF_EMAIL_DOMAIN)
 
 SSRS reports run on a nightly subscription and email CSVs to the dedicated Gmail inbox.
 Each report has a unique subject line so this script can identify which list it feeds.
@@ -45,7 +45,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 # ---------------------------------------------------------------------------
 GMAIL_ADDRESS      = os.environ['GMAIL_ADDRESS']
 GMAIL_APP_PASSWORD = os.environ['GMAIL_APP_PASSWORD']
-STAFF_EMAIL_DOMAIN = os.environ.get('STAFF_EMAIL_DOMAIN', 'rhpl.org')
+STAFF_EMAIL_DOMAIN = os.environ['STAFF_EMAIL_DOMAIN']   # required — set in .env
 
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE      = os.path.join(SCRIPT_DIR, 'patron_sync.log')
@@ -157,7 +157,7 @@ def cleanup_gmail(mail: imaplib.IMAP4_SSL, all_msg_ids: list,
 # ---------------------------------------------------------------------------
 # Patron data parsing
 # ---------------------------------------------------------------------------
-LEAP_BASE = 'https://catalog.rhpl.org/leapwebapp/staff/default#patrons/'
+LEAP_BASE = os.environ['LEAP_BASE_URL']   # required — set in .env (see .env.template)
 
 
 def parse_patron_data(csv_text: str, logger: logging.Logger) -> dict:

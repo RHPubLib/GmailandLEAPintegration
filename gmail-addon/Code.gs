@@ -83,8 +83,9 @@ function buildUnknownCard() {
 }
 
 function buildHeader() {
+  // TODO: update title and icon URL to match your library
   return CardService.newCardHeader()
-    .setTitle('RHPL Patron Check')
-    .setImageUrl('https://www.rhpl.org/favicon.ico')
+    .setTitle('Patron Check')
+    .setImageUrl('https://yourdomain.org/favicon.ico')
     .setImageStyle(CardService.ImageStyle.CIRCLE);
 }

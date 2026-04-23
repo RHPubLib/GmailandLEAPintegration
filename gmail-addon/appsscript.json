@@ -8,7 +8,7 @@
   ],
   "gmail": {
     "name": "RHPL Patron Check",
-    "logoUrl": "https://www.rhpl.org/favicon.ico",
+    "logoUrl": "https://yourdomain.org/favicon.ico",
     "contextualTriggers": [
       {
         "unconditional": {},
