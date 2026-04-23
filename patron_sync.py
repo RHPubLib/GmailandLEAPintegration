@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-polaris_to_sublime_sync.py
+patron_sync.py
 Nightly sync: Polaris patron emails → Google Sheet (3 tabs by patron type).
 
 Flow:
-  1. Connect to Gmail (sublime-sync@rhpl.org) via IMAP
+  1. Connect to Gmail via IMAP (dedicated inbox that receives SSRS report emails)
   2. For each of 3 SSRS subscription emails (by subject line), extract the CSV attachment
   3. Parse and normalize email addresses (and LEAP URLs) from each CSV
   4. Apply cross-list priority dedup: FULL > DIGITAL > LIMITED
@@ -13,15 +13,15 @@ Flow:
   6. Delete processed report emails from inbox
 
 Groups:
-  Full    — RHPL Cardholder  (PatronCodes 1,3,6,8,14,24,25,26,29)
-  Digital — RHPL Digital Card (PatronCodes 15,20,27)
-  Limited — RHPL Limited      (PatronCodes 2,4,9,17)
+  Full    — Full Cardholder   (PatronCodes 1,3,6,8,14,24,25,26,29)
+  Digital — Digital Card      (PatronCodes 15,20,27)
+  Limited — Restricted Card   (PatronCodes 2,4,9,17)
   Excluded (no card) — Staff  (PatronCodes 7,19,22)
 
-SSRS reports run on a nightly subscription and email CSVs to sublime-sync@rhpl.org.
+SSRS reports run on a nightly subscription and email CSVs to the dedicated Gmail inbox.
 Each report has a unique subject line so this script can identify which list it feeds.
 
-Runs via cron on the RHPL Linux server.
+Runs via systemd timer (or cron) on a Linux server.
 Credentials loaded from .env in the same directory.
 """
 
@@ -48,7 +48,7 @@ GMAIL_APP_PASSWORD = os.environ['GMAIL_APP_PASSWORD']
 STAFF_EMAIL_DOMAIN = os.environ.get('STAFF_EMAIL_DOMAIN', 'rhpl.org')
 
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE      = os.path.join(SCRIPT_DIR, 'polaris_sync.log')
+LOG_FILE      = os.path.join(SCRIPT_DIR, 'patron_sync.log')
 LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 
 GOOGLE_SERVICE_ACCOUNT_KEY = os.environ.get('GOOGLE_SERVICE_ACCOUNT_KEY', '')
@@ -58,17 +58,17 @@ GOOGLE_SHEET_ID            = os.environ.get('GOOGLE_SHEET_ID', '')
 LISTS = [
     {
         'name':      'patron_emails_full',
-        'subject':   os.environ.get('SSRS_SUBJECT_FULL',    'Sublime Full Patron Export'),
+        'subject':   os.environ.get('SSRS_SUBJECT_FULL',    'Full Patron Export'),
         'sheet_tab': 'Full',
     },
     {
         'name':      'patron_emails_digital',
-        'subject':   os.environ.get('SSRS_SUBJECT_DIGITAL', 'Sublime Digital Patron Export'),
+        'subject':   os.environ.get('SSRS_SUBJECT_DIGITAL', 'Digital Patron Export'),
         'sheet_tab': 'Digital Card',
     },
     {
         'name':      'patron_emails_limited',
-        'subject':   os.environ.get('SSRS_SUBJECT_LIMITED', 'Sublime Limited Patron Export'),
+        'subject':   os.environ.get('SSRS_SUBJECT_LIMITED', 'Limited Patron Export'),
         'sheet_tab': 'Restricted',
     },
 ]

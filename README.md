@@ -10,7 +10,7 @@ Built by [Robbins Heights Public Library](https://www.rhpl.org) · Rochester, NH
 
 Staff regularly receive emails from patrons and need to quickly understand who they're speaking with — full cardholder, digital-only account, or restricted card — without manually looking them up in LEAP.
 
-We originally explored Sublime Security banners embedded in email subjects, but discovered a critical privacy problem: **banners embedded in email bodies travel with forwards and replies**, potentially exposing patron status to unintended recipients.
+The key design constraint is **privacy**: any patron status indicator embedded in an email body travels with forwards and replies, potentially exposing patron information to unintended recipients.
 
 This tool solves that with a **Gmail Add-on sidebar card** — it appears only in the reading staff member's Gmail view and is never part of the email body. It cannot be forwarded. Discussed at IUG and built with direct input from Google engineers at Google Cloud Next 2026.
 
