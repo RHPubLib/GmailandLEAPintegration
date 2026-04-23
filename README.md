@@ -2,7 +2,7 @@
 
 A privacy-safe patron verification tool for public libraries using **Polaris ILS** and **Google Workspace**. When staff open an email from a known patron, a sidebar card appears in Gmail showing the patron's account type and a one-click deep-link to their Polaris LEAP record.
 
-Built by [Robbins Heights Public Library](https://www.rhpl.org) · Rochester, NH · Shared freely for the library community
+Built by [Rochester Hills Public Library](https://www.rhpl.org) · Rochester, MI · Shared freely for the library community
 
 ---
 
@@ -236,5 +236,5 @@ PRs welcome. If you adapt this for a different ILS, email platform, or patron co
 
 ---
 
-*Built at [Robbins Heights Public Library](https://www.rhpl.org), Rochester, NH.*
+*Built at [Rochester Hills Public Library](https://www.rhpl.org), Rochester, MI.*
 *Presented and discussed at IUG and Google Cloud Next 2026.*
