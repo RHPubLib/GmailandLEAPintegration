@@ -4,13 +4,13 @@ patron_sync.py
 Nightly sync: Polaris patron emails → Google Sheet (3 tabs by patron type).
 
 Flow:
-  1. Connect to Gmail via IMAP (dedicated inbox that receives SSRS report emails)
+  1. Connect to Gmail API using service account with domain-wide delegation
   2. For each of 3 SSRS subscription emails (by subject line), extract the CSV attachment
   3. Parse and normalize email addresses (and LEAP URLs) from each CSV
   4. Apply cross-list priority dedup: FULL > DIGITAL > LIMITED
      (a patron with multiple accounts only appears in their highest-priority list)
   5. Write each list to its Google Sheet tab (email + LEAP URL)
-  6. Delete processed report emails from inbox
+  6. Trash processed report emails from inbox
 
 Groups (customize PatronCodeIDs in LISTS below to match your Polaris configuration):
   Full    — Full Cardholder
@@ -25,9 +25,8 @@ Runs via systemd timer (or cron) on a Linux server.
 Credentials loaded from .env in the same directory.
 """
 
+import base64
 import csv
-import email
-import imaplib
 import io
 import logging
 import logging.handlers
@@ -37,6 +36,7 @@ import sys
 import gspread
 from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
@@ -44,7 +44,6 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 # Configuration
 # ---------------------------------------------------------------------------
 GMAIL_ADDRESS      = os.environ['GMAIL_ADDRESS']
-GMAIL_APP_PASSWORD = os.environ['GMAIL_APP_PASSWORD']
 STAFF_EMAIL_DOMAIN = os.environ['STAFF_EMAIL_DOMAIN']   # required — set in .env
 
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
@@ -96,62 +95,88 @@ def setup_logging() -> logging.Logger:
 
 
 # ---------------------------------------------------------------------------
-# Gmail / IMAP helpers
+# Gmail API helpers (service account + domain-wide delegation)
 # ---------------------------------------------------------------------------
-def connect_gmail(logger: logging.Logger) -> imaplib.IMAP4_SSL:
-    logger.info(f'Connecting to Gmail as {GMAIL_ADDRESS}...')
-    mail = imaplib.IMAP4_SSL('imap.gmail.com', 993)
-    mail.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-    mail.select('INBOX')
-    return mail
+def get_gmail_service(logger: logging.Logger):
+    """Build Gmail API service, impersonating GMAIL_ADDRESS via DWD."""
+    creds = Credentials.from_service_account_file(
+        GOOGLE_SERVICE_ACCOUNT_KEY,
+        scopes=['https://www.googleapis.com/auth/gmail.modify'],
+        subject=GMAIL_ADDRESS,
+    )
+    service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
+    logger.info(f'Connected to Gmail API as {GMAIL_ADDRESS}')
+    return service
 
 
-def fetch_csv_for_subject(mail: imaplib.IMAP4_SSL, subject: str,
+def _extract_csv_from_payload(service, msg_id: str, payload: dict,
+                               logger: logging.Logger) -> str | None:
+    """Recursively search message payload parts for a CSV attachment."""
+    mime     = payload.get('mimeType', '')
+    filename = payload.get('filename', '')
+
+    if mime == 'text/csv' or filename.lower().endswith('.csv'):
+        body = payload.get('body', {})
+        if 'data' in body:
+            data = base64.urlsafe_b64decode(body['data'])
+        elif 'attachmentId' in body:
+            att  = service.users().messages().attachments().get(
+                userId='me', messageId=msg_id, id=body['attachmentId']
+            ).execute()
+            data = base64.urlsafe_b64decode(att['data'])
+        else:
+            return None
+        logger.info(f'  CSV attachment: {filename} ({len(data):,} bytes)')
+        return data.decode('utf-8-sig')
+
+    for part in payload.get('parts', []):
+        result = _extract_csv_from_payload(service, msg_id, part, logger)
+        if result:
+            return result
+
+    return None
+
+
+def fetch_csv_for_subject(service, subject: str,
                           logger: logging.Logger) -> tuple[str | None, list]:
     """
     Find emails matching `subject`, extract CSV from the most recent one.
     Returns (csv_text, all_msg_ids) — csv_text is None if no matching email found.
     """
-    status, data = mail.search(None, f'SUBJECT "{subject}"')
-    if status != 'OK' or not data[0]:
+    result   = service.users().messages().list(
+        userId='me', q=f'subject:"{subject}"'
+    ).execute()
+    messages = result.get('messages', [])
+
+    if not messages:
         logger.warning(f'No email found with subject "{subject}" — skipping this list')
         return None, []
 
-    msg_ids = data[0].split()
-    logger.info(f'Subject "{subject}": found {len(msg_ids)} email(s) — using most recent')
+    all_msg_ids = [m['id'] for m in messages]
+    logger.info(f'Subject "{subject}": found {len(messages)} email(s) — using most recent')
 
-    latest_id = msg_ids[-1]
-    status, msg_data = mail.fetch(latest_id, '(RFC822)')
-    raw_email = msg_data[0][1]
-    msg = email.message_from_bytes(raw_email)
+    # Gmail API returns newest first
+    msg = service.users().messages().get(
+        userId='me', id=messages[0]['id'], format='full'
+    ).execute()
 
-    for part in msg.walk():
-        content_type = part.get_content_type()
-        filename     = part.get_filename() or ''
-        if content_type == 'text/csv' or filename.lower().endswith('.csv'):
-            payload  = part.get_payload(decode=True)
-            csv_text = payload.decode('utf-8-sig')
-            logger.info(f'  CSV attachment: {filename} ({len(payload)} bytes)')
-            return csv_text, msg_ids
+    csv_text = _extract_csv_from_payload(service, msg['id'], msg['payload'], logger)
+    if csv_text is None:
+        logger.warning(f'Email found for "{subject}" but no CSV attachment — skipping')
 
-    logger.warning(f'Email found for "{subject}" but no CSV attachment — skipping')
-    return None, msg_ids
+    return csv_text, all_msg_ids
 
 
-def cleanup_gmail(mail: imaplib.IMAP4_SSL, all_msg_ids: list,
-                  logger: logging.Logger) -> None:
-    """Delete all collected report emails after a successful sync."""
+def cleanup_gmail(service, all_msg_ids: list, logger: logging.Logger) -> None:
+    """Trash all collected report emails after a successful sync."""
     if not all_msg_ids:
         return
     try:
         for msg_id in all_msg_ids:
-            mail.store(msg_id, '+FLAGS', '\\Deleted')
-        mail.expunge()
-        logger.info(f'Deleted {len(all_msg_ids)} processed report email(s) from inbox')
+            service.users().messages().trash(userId='me', id=msg_id).execute()
+        logger.info(f'Trashed {len(all_msg_ids)} processed report email(s) from inbox')
     except Exception as exc:
         logger.warning(f'Email cleanup failed (non-fatal): {exc}')
-    finally:
-        mail.logout()
 
 
 # ---------------------------------------------------------------------------
@@ -243,12 +268,12 @@ def main():
 
     try:
         # Step 1 — Fetch CSVs from Gmail
-        mail        = connect_gmail(logger)
+        service     = get_gmail_service(logger)
         buckets     = {}   # list_name → set of emails
         all_msg_ids = []   # accumulate all report email IDs for cleanup
 
         for lst in LISTS:
-            csv_text, msg_ids = fetch_csv_for_subject(mail, lst['subject'], logger)
+            csv_text, msg_ids = fetch_csv_for_subject(service, lst['subject'], logger)
             all_msg_ids.extend(msg_ids)
             if csv_text:
                 buckets[lst['name']] = parse_patron_data(csv_text, logger)
@@ -295,8 +320,8 @@ def main():
         else:
             logger.warning('GOOGLE_SERVICE_ACCOUNT_KEY or GOOGLE_SHEET_ID not set — skipping Sheet update')
 
-        # Step 4 — Delete processed emails from inbox
-        cleanup_gmail(mail, all_msg_ids, logger)
+        # Step 4 — Trash processed emails from inbox
+        cleanup_gmail(service, all_msg_ids, logger)
 
         logger.info('Sync completed successfully')
         logger.info('=' * 60)
