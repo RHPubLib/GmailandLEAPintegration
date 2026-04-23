@@ -192,7 +192,8 @@ def parse_patron_data(csv_text: str, logger: logging.Logger) -> dict:
                 pass  # header row or empty/non-numeric PatronID
 
         if not first_data_row_logged:
-            logger.info(f'  CSV sample row: {row!r}  →  leap_url={leap_url!r}')
+            has_leap = bool(leap_url)
+            logger.info(f'  CSV format: {len(row)} column(s) — LEAP URL {"present" if has_leap else "MISSING (PatronID column not found)"}')
             first_data_row_logged = True
 
         if normalized not in result:   # first row wins (SSRS already ranked by recency)
