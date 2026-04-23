@@ -1,0 +1,7 @@
+.env
+rhpl-patron-sync.json
+patron_sync.log
+patron_sync.log.*
+__pycache__/
+*.pyc
+*.pyo

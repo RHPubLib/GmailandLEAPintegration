@@ -1,0 +1,19 @@
+{
+  "timeZone": "America/New_York",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/gmail.addons.execute",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/spreadsheets"
+  ],
+  "gmail": {
+    "name": "RHPL Patron Check",
+    "logoUrl": "https://www.rhpl.org/favicon.ico",
+    "contextualTriggers": [
+      {
+        "unconditional": {},
+        "onTriggerFunction": "onGmailMessage"
+      }
+    ]
+  }
+}

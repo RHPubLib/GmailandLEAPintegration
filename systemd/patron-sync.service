@@ -1,0 +1,12 @@
+[Unit]
+Description=Polaris → Google Sheet patron sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=dbrown
+WorkingDirectory=/var/opt/rhpl/patron-sync
+ExecStart=/usr/bin/python3 /var/opt/rhpl/patron-sync/patron_sync.py
+StandardOutput=append:/var/opt/rhpl/patron-sync/patron_sync.log
+StandardError=append:/var/opt/rhpl/patron-sync/patron_sync.log
