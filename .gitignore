@@ -1,4 +1,7 @@
 .env
+.env.*
+!.env.example
+.claude/settings.local.json
 *service-account*.json
 *-key.json
 rhpl-patron-sync.json
